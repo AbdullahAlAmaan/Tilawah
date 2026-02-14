@@ -21,6 +21,8 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Missing file or surahId" }, { status: 400 });
         }
 
+        console.log(`[API] Received file: ${file.size} bytes, type: ${file.type}, surah: ${surahId}, duration: ${durationMs}`);
+
         const surah = getSurahById(surahId);
         if (!surah) {
             return NextResponse.json({ error: "Invalid surah" }, { status: 400 });
@@ -52,6 +54,7 @@ export async function POST(req: NextRequest) {
         });
 
         // 3. Generate Coach Feedback (Mastra)
+        // 3. Generate Coach Feedback (Mastra)
         const feedback = await generateCoachingTip({
             surahName: surah.name,
             overall: result.overall,
@@ -68,10 +71,26 @@ export async function POST(req: NextRequest) {
             wordCount: result.wordCount || 0
         });
 
-        // 4. Store result in DB (so it appears in history and /results/[id])
+        // 4. Generate TTS Audio (Smallest.ai)
+        let audioBase64 = null;
+        try {
+            const { synthesizeSpeech } = require('@/lib/smallest');
+            const ttsResult = await synthesizeSpeech(feedback);
+            audioBase64 = Buffer.from(ttsResult.audioData).toString('base64');
+        } catch (ttsError) {
+            console.error("TTS Generation failed:", ttsError);
+        }
+
+        // 5. Store result in DB (so it appears in history and /results/[id])
         saveSession(result, false, feedback);
 
-        return NextResponse.json({ sessionId, success: true });
+        return NextResponse.json({
+            sessionId,
+            success: true,
+            feedback,
+            audioBase64,
+            analysis: result
+        });
 
     } catch (err: any) {
         console.error("Processing API Error:", err);

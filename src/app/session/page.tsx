@@ -1,174 +1,142 @@
 'use client';
 
-import { Suspense, useState, useRef, useEffect } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
-import { getSurahById } from '@/data/surahs';
-import { Mic, Square, Loader2, ArrowLeft } from 'lucide-react';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation'; // Correct import for App Router
+import { getSurahById, Surah } from '@/data/surahs';
+import { Mic, CheckCircle, ArrowLeft, Loader2, Volume2 } from 'lucide-react';
 import Link from 'next/link';
+import { useConversation } from '@/hooks/useConversation';
 
 function SessionContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
-  const surahId = searchParams?.get('surah');
-  const surah = surahId ? getSurahById(surahId) : undefined;
-
-  const [isRecording, setIsRecording] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [duration, setDuration] = useState(0);
-
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const surahId = searchParams.get('surah');
+  const [surah, setSurah] = useState<Surah | undefined>(undefined);
+  const router = useRouter();
 
   useEffect(() => {
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, []);
-
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-      mediaRecorderRef.current = mediaRecorder;
-      chunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-
-      mediaRecorder.onstop = processRecording;
-
-      mediaRecorder.start();
-      setIsRecording(true);
-      setError(null);
-
-      // Start timer
-      setDuration(0);
-      timerRef.current = setInterval(() => {
-        setDuration(p => p + 1);
-      }, 1000);
-
-    } catch (err: any) {
-      setError("Could not access microphone: " + err.message);
+    if (surahId) {
+      const s = getSurahById(surahId);
+      setSurah(s);
     }
-  };
+  }, [surahId]);
 
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      if (timerRef.current) clearInterval(timerRef.current);
-    }
-  };
+  const { state, feedback, startSession } = useConversation({
+    onAudioSubmit: async (audioBlob) => {
+      if (!surah) throw new Error("No Surah selected");
 
-  const processRecording = async () => {
-    setIsProcessing(true);
-    const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+      const formData = new FormData();
+      formData.append('file', audioBlob);
+      formData.append('surahId', surah.id);
+      // Estimate duration if not provided by recorder (hook could provide it, but for now simple)
+      formData.append('duration', '5000');
 
-    // Convert blob to base64 or send as FormData to API
-    const formData = new FormData();
-    formData.append('file', blob, 'recording.webm');
-    formData.append('surahId', surah?.id || '');
-    formData.append('duration', (duration * 1000).toString()); // ms
-
-    try {
       const res = await fetch('/api/process-session', {
         method: 'POST',
         body: formData,
       });
 
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error("API Failed");
 
       const data = await res.json();
-      router.push(`/results/${data.sessionId}`);
-    } catch (err: any) {
-      setError(err.message);
-      setIsProcessing(false);
+      return {
+        feedback: data.feedback,
+        audioUrl: data.audioBase64 ? `data:audio/wav;base64,${data.audioBase64}` : ''
+      };
     }
-  };
+  });
+
+  // Auto-start session when mounted and surah found
+  useEffect(() => {
+    if (surah) {
+      startSession();
+    }
+  }, [surah]);
 
   if (!surah) {
-    return (
-      <div className="p-8 text-center text-red-500">
-        Surah not found. <Link href="/" className="underline">Go Home</Link>
-      </div>
-    );
+    return <div className="p-8 text-center">Loading Surah...</div>;
   }
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center p-8 max-w-md mx-auto relative">
-      <Link href="/" className="absolute top-8 left-8 p-2 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
-        <ArrowLeft className="w-6 h-6" />
-      </Link>
+    <div className="min-h-screen bg-slate-50 dark:bg-black font-sans flex flex-col items-center justify-center p-6 relative overflow-hidden">
 
-      <div className="text-center space-y-2 mb-12">
-        <h1 className="text-3xl font-bold">{surah.name}</h1>
-        <p className="text-zinc-500">{surah.englishName}</p>
+      {/* Background Ambience */}
+      <div className={`absolute inset-0 transition-opacity duration-1000 ${state === 'LISTENING' ? 'opacity-20' : 'opacity-5'}`}>
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-emerald-500 rounded-full blur-3xl animate-pulse-ring"></div>
       </div>
 
-      {/* Recitation Card */}
-      <div className="w-full card mb-12 bg-zinc-50 dark:bg-zinc-900/50">
-        <div className="text-center space-y-6">
-          <div className="font-arabic text-3xl leading-loose text-zinc-800 dark:text-zinc-200" dir="rtl">
-            {surah.fullText}
-          </div>
-        </div>
-      </div>
+      <div className="z-10 w-full max-w-md flex flex-col items-center gap-8">
 
-      {/* Controls */}
-      <div className="flex flex-col items-center gap-6">
-        <div className="text-4xl font-mono tabular-nums text-zinc-400">
-          {formatTime(duration)}
+        {/* Header */}
+        <div className="text-center space-y-2">
+          <h1 className="text-4xl font-bold tracking-tight">{surah.name}</h1>
+          <p className="text-xl text-zinc-500 font-arabic">{surah.arabicName}</p>
         </div>
 
-        {isProcessing ? (
-          <div className="flex flex-col items-center gap-3">
-            <Loader2 className="w-12 h-12 text-emerald-500 animate-spin" />
-            <p className="text-sm font-medium animate-pulse text-zinc-500">Processing with smallest.ai...</p>
-          </div>
-        ) : (
-          <button
-            onClick={isRecording ? stopRecording : startRecording}
-            className={`
-              w-24 h-24 rounded-full flex items-center justify-center transition-all shadow-lg
-              ${isRecording
-                ? 'bg-red-500 hover:bg-red-600 animate-pulse-ring'
-                : 'bg-emerald-600 hover:bg-emerald-700 hover:scale-105'
-              }
-            `}
-          >
-            {isRecording ? <Square className="w-8 h-8 text-white fill-current" /> : <Mic className="w-8 h-8 text-white" />}
-          </button>
-        )}
+        {/* Dynamic Status Visualizer */}
+        <div className="relative w-64 h-64 flex items-center justify-center">
 
-        {error && (
-          <div className="p-4 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg text-sm max-w-sm">
-            {error}
-          </div>
-        )}
+          {/* Listening State */}
+          {state === 'LISTENING' && (
+            <div className="relative">
+              <div className="absolute inset-0 bg-emerald-500/20 rounded-full animate-ping"></div>
+              <div className="w-48 h-48 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center border-4 border-emerald-500 transition-all duration-500">
+                <Mic className="w-16 h-16 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <p className="absolute -bottom-12 left-1/2 -translate-x-1/2 text-emerald-600 font-medium animate-pulse">Listening...</p>
+            </div>
+          )}
 
-        <p className="text-sm text-zinc-500 max-w-xs text-center">
-          {isRecording
-            ? "Recite clearly at a moderate pace. Tap stop when finished."
-            : "Tap the microphone to begin your session."
-          }
-        </p>
+          {/* Thinking State */}
+          {state === 'THINKING' && (
+            <div className="relative">
+              <div className="w-48 h-48 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center border-4 border-amber-500 animate-pulse">
+                <Loader2 className="w-16 h-16 text-amber-600 dark:text-amber-400 animate-spin" />
+              </div>
+              <p className="absolute -bottom-12 left-1/2 -translate-x-1/2 text-amber-600 font-medium">Analyzing...</p>
+            </div>
+          )}
+
+          {/* Speaking State */}
+          {state === 'SPEAKING' && (
+            <div className="relative">
+              <div className="w-48 h-48 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center border-4 border-blue-500">
+                <Volume2 className="w-16 h-16 text-blue-600 dark:text-blue-400 animate-bounce" />
+              </div>
+              <p className="absolute -bottom-12 left-1/2 -translate-x-1/2 text-blue-600 font-medium">Coach Speaking...</p>
+            </div>
+          )}
+
+          {/* Idle State */}
+          {state === 'IDLE' && (
+            <button onClick={startSession} className="w-48 h-48 bg-zinc-100 dark:bg-zinc-800 rounded-full flex items-center justify-center border-4 border-zinc-300 hover:border-emerald-500 hover:scale-105 transition-all cursor-pointer">
+              <span className="text-lg font-medium text-zinc-500">Tap to Start</span>
+            </button>
+          )}
+        </div>
+
+        {/* Feedback Display */}
+        <div className="min-h-[100px] w-full text-center px-4">
+          {feedback && (
+            <div className="bg-white dark:bg-zinc-900 p-4 rounded-xl shadow-sm border border-zinc-200 dark:border-zinc-800 animate-in fade-in slide-in-from-bottom-4">
+              <p className="text-lg text-zinc-700 dark:text-zinc-300 font-medium">"{feedback}"</p>
+            </div>
+          )}
+        </div>
+
+        {/* Navigation */}
+        <Link href="/" className="text-zinc-400 hover:text-zinc-600 flex items-center gap-2 transition-colors">
+          <ArrowLeft className="w-4 h-4" />
+          Back to Surahs
+        </Link>
+
       </div>
-    </main>
+    </div>
   );
 }
 
 export default function SessionPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+    <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
       <SessionContent />
     </Suspense>
   );

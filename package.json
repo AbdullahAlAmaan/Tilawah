@@ -17,6 +17,8 @@
     "ai": "^6.0.86",
     "better-sqlite3": "^12.6.2",
     "clsx": "^2.1.1",
+    "form-data": "^4.0.5",
+    "hark": "^1.2.3",
     "idb": "^8.0.3",
     "lucide-react": "^0.564.0",
     "next": "16.1.6",
@@ -30,6 +32,8 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/form-data": "^2.2.1",
+    "@types/hark": "^1.2.5",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
